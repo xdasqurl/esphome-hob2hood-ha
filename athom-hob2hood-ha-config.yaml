@@ -1,0 +1,447 @@
+esphome:
+  name: athom-hob2hood-ha
+  friendly_name: "Kitchen Hood Controller"
+  comment: "AEG/Electrolux Hob2Hood with manual override using Athom ESP32 4CH Relay Board"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: INFO
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "your_32_character_api_key_here"
+
+ota:
+  password: "your_ota_password_here"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Athom-Hob2Hood Fallback Hotspot"
+    password: "fallback_password"
+
+captive_portal:
+
+# Web server for local access
+web_server:
+  port: 80
+
+# Global variables for state management
+globals:
+  - id: current_mode
+    type: int
+    initial_value: '0'  # 0 = hob2hood mode, 1 = manual mode
+  - id: ventilation_level
+    type: int
+    initial_value: '0'  # 0 = off, 1-3 = speeds
+  - id: light_state
+    type: bool
+    initial_value: 'false'
+  - id: manual_timeout
+    type: int
+    initial_value: '0'  # Countdown for returning to hob2hood mode
+
+# IR Receiver for hob2hood signals
+remote_receiver:
+  pin: GPIO2  # Connected to IO2 on right GPIO header
+  dump: all   # Enable for initial testing, disable once working
+  tolerance: 50%
+  filter: 250us
+  idle: 4ms
+
+# Manual control inputs
+binary_sensor:
+  # Light button (momentary)
+  - platform: gpio
+    pin:
+      number: GPIO25  # IO25 on left GPIO header
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Manual Light Button"
+    id: manual_light_btn
+    on_press:
+      - script.execute: handle_manual_light_press
+    on_release:
+      - script.execute: start_manual_timeout
+
+  # Fan speed switches (or positions of a multi-position switch)
+  - platform: gpio
+    pin:
+      number: GPIO26  # IO26 - Fan Speed 1
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Manual Fan Speed 1"
+    id: manual_fan_1
+    on_press:
+      - script.execute: 
+          id: handle_manual_fan_press
+          speed: 1
+    on_release:
+      - script.execute: start_manual_timeout
+
+  - platform: gpio
+    pin:
+      number: GPIO32  # IO32 - Fan Speed 2
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Manual Fan Speed 2"
+    id: manual_fan_2
+    on_press:
+      - script.execute: 
+          id: handle_manual_fan_press
+          speed: 2
+    on_release:
+      - script.execute: start_manual_timeout
+
+  - platform: gpio
+    pin:
+      number: GPIO33  # IO33 - Fan Speed 3
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Manual Fan Speed 3"
+    id: manual_fan_3
+    on_press:
+      - script.execute: 
+          id: handle_manual_fan_press
+          speed: 3
+    on_release:
+      - script.execute: start_manual_timeout
+
+  # Board status
+  - platform: status
+    name: "Hood Controller Status"
+
+# Relay outputs (using built-in relays)
+switch:
+  # Physical relay outputs (internal use only)
+  - platform: gpio
+    pin: GPIO12
+    name: "Hood Fan Speed 1 Relay"
+    id: fan_speed_1_relay
+    internal: true
+    
+  - platform: gpio
+    pin: GPIO13
+    name: "Hood Fan Speed 2 Relay"
+    id: fan_speed_2_relay
+    internal: true
+    
+  - platform: gpio
+    pin: GPIO14
+    name: "Hood Fan Speed 3 Relay"
+    id: fan_speed_3_relay
+    internal: true
+    
+  - platform: gpio
+    pin: GPIO15
+    name: "Hood Light Relay"
+    id: light_relay
+    internal: true
+
+  # Template switches for Home Assistant control
+  - platform: template
+    name: "Hood Light"
+    id: hood_light_control
+    lambda: |-
+      return id(light_state);
+    turn_on_action:
+      - globals.set:
+          id: light_state
+          value: 'true'
+      - script.execute: update_hood_outputs
+    turn_off_action:
+      - globals.set:
+          id: light_state
+          value: 'false'
+      - script.execute: update_hood_outputs
+
+# Fan entity for Home Assistant
+fan:
+  - platform: template
+    name: "Hood Ventilation"
+    id: hood_fan
+    speed_count: 3
+    lambda: |-
+      if (id(ventilation_level) > 0) {
+        return true;
+      } else {
+        return false;
+      }
+    speed_lambda: |-
+      return id(ventilation_level);
+    turn_on_action:
+      - if:
+          condition:
+            lambda: 'return id(hood_fan).speed == 0;'
+          then:
+            - globals.set:
+                id: ventilation_level
+                value: '1'
+          else:
+            - globals.set:
+                id: ventilation_level
+                value: !lambda 'return id(hood_fan).speed;'
+      - script.execute: update_hood_outputs
+    turn_off_action:
+      - globals.set:
+          id: ventilation_level
+          value: '0'
+      - script.execute: update_hood_outputs
+    speed_action:
+      - globals.set:
+          id: ventilation_level
+          value: !lambda 'return speed;'
+      - script.execute: update_hood_outputs
+
+# Text sensors for status display
+text_sensor:
+  - platform: template
+    name: "Hood Control Mode"
+    id: hood_mode_display
+    update_interval: 1s
+    lambda: |-
+      if (id(current_mode) == 0) {
+        return {"Hob2Hood Auto"};
+      } else {
+        if (id(manual_timeout) > 0) {
+          return {"Manual (" + to_string(id(manual_timeout)) + "s)"};
+        } else {
+          return {"Manual"};
+        }
+      }
+
+  - platform: wifi_info
+    ip_address:
+      name: "Hood Controller IP Address"
+    ssid:
+      name: "Hood Controller Connected SSID"
+
+# Sensors for monitoring
+sensor:
+  - platform: uptime
+    name: "Hood Controller Uptime"
+    
+  - platform: wifi_signal
+    name: "Hood Controller WiFi Signal"
+    update_interval: 60s
+
+# Main control scripts
+script:
+  # Handle manual light button press
+  - id: handle_manual_light_press
+    then:
+      - logger.log: "Manual light button pressed"
+      - script.execute: enter_manual_mode
+      - globals.set:
+          id: light_state
+          value: !lambda 'return !id(light_state);'
+      - script.execute: update_hood_outputs
+
+  # Handle manual fan speed button press with multi-speed protection
+  - id: handle_manual_fan_press
+    parameters:
+      speed: int
+    then:
+      - logger.log: 
+          format: "Manual fan speed %d pressed"
+          args: ['speed']
+      - script.execute: enter_manual_mode
+      
+      # PROTECTION: Check if multiple speeds are active (slider in transition)
+      - delay: 50ms  # Brief delay to let slider settle
+      - lambda: |-
+          int active_speeds = 0;
+          if (id(manual_fan_1).state) active_speeds++;
+          if (id(manual_fan_2).state) active_speeds++;
+          if (id(manual_fan_3).state) active_speeds++;
+          
+          if (active_speeds > 1) {
+            ESP_LOGW("PROTECTION", "Multiple fan speeds detected (%d) - ignoring until slider settles", active_speeds);
+            return;  // Don't change speed until only one is active
+          }
+          
+          // Safe to change speed
+          id(ventilation_level) = speed;
+          id(update_hood_outputs).execute();
+
+  # Enter manual mode
+  - id: enter_manual_mode
+    then:
+      - if:
+          condition:
+            lambda: 'return id(current_mode) == 0;'
+          then:
+            - logger.log: "Switching to manual mode"
+            - globals.set:
+                id: current_mode
+                value: '1'
+
+  # Start manual mode timeout
+  - id: start_manual_timeout
+    then:
+      - globals.set:
+          id: manual_timeout
+          value: '10'  # 10 seconds timeout
+      - script.execute: manual_timeout_countdown
+
+  # Manual timeout countdown
+  - id: manual_timeout_countdown
+    then:
+      - delay: 1s
+      - lambda: |-
+          if (id(manual_timeout) > 0) {
+            id(manual_timeout) = id(manual_timeout) - 1;
+          }
+      - if:
+          condition:
+            lambda: 'return id(manual_timeout) > 0;'
+          then:
+            # Continue countdown if no manual inputs are active
+            - if:
+                condition:
+                  lambda: |-
+                    return !id(manual_light_btn).state && 
+                           !id(manual_fan_1).state && 
+                           !id(manual_fan_2).state && 
+                           !id(manual_fan_3).state;
+                then:
+                  - script.execute: manual_timeout_countdown
+                else:
+                  # Reset timeout if manual input is still active
+                  - globals.set:
+                      id: manual_timeout
+                      value: '10'
+                  - script.execute: manual_timeout_countdown
+          else:
+            # Timeout reached, return to hob2hood mode
+            - logger.log: "Manual timeout reached, returning to hob2hood mode"
+            - globals.set:
+                id: current_mode
+                value: '0'
+
+  # Update physical relay outputs with protection against multiple speeds
+  - id: update_hood_outputs
+    then:
+      - logger.log: 
+          format: "Updating outputs: Fan=%d, Light=%s"
+          args: ['id(ventilation_level)', 'id(light_state) ? "ON" : "OFF"']
+      
+      # Control light relay
+      - if:
+          condition:
+            lambda: 'return id(light_state);'
+          then:
+            - switch.turn_on: light_relay
+          else:
+            - switch.turn_off: light_relay
+      
+      # PROTECTION: Always turn off ALL fan relays first
+      - logger.log: "Turning off all fan relays for safe switching"
+      - switch.turn_off: fan_speed_1_relay
+      - switch.turn_off: fan_speed_2_relay
+      - switch.turn_off: fan_speed_3_relay
+      - delay: 200ms  # Extended delay for relay contact settling
+      
+      # Now safely turn on the desired relay
+      - if:
+          condition:
+            lambda: 'return id(ventilation_level) == 1;'
+          then:
+            - switch.turn_on: fan_speed_1_relay
+            - logger.log: "Fan Speed 1 ON (safe)"
+      - if:
+          condition:
+            lambda: 'return id(ventilation_level) == 2;'
+          then:
+            - switch.turn_on: fan_speed_2_relay
+            - logger.log: "Fan Speed 2 ON (safe)"
+      - if:
+          condition:
+            lambda: 'return id(ventilation_level) == 3;'
+          then:
+            - switch.turn_on: fan_speed_3_relay
+            - logger.log: "Fan Speed 3 ON (safe)"
+      - if:
+          condition:
+            lambda: 'return id(ventilation_level) == 0;'
+          then:
+            - logger.log: "All fans OFF (safe)"
+
+# Hob2Hood IR command handling
+remote_receiver:
+  - pin: GPIO2
+    dump: []  # Disable once IR codes are confirmed working
+    on_nec:
+      - lambda: |-
+          // Only process IR commands in hob2hood mode
+          if (id(current_mode) != 0) {
+            ESP_LOGI("IR", "Ignoring IR command - in manual mode");
+            return;
+          }
+          
+          ESP_LOGI("IR", "Received IR command: 0x%08X", (uint32_t) x.command);
+          
+          switch(x.command) {
+            case 0xE3C01BE2:  // Hood Vent Level 1
+              ESP_LOGI("IR", "Hood: Ventilation Level 1");
+              id(ventilation_level) = 1;
+              id(update_hood_outputs).execute();
+              break;
+              
+            case 0xD051C301:  // Hood Vent Level 2
+              ESP_LOGI("IR", "Hood: Ventilation Level 2");
+              id(ventilation_level) = 2;
+              id(update_hood_outputs).execute();
+              break;
+              
+            case 0xC22FFFD7:  // Hood Vent Level 3
+              ESP_LOGI("IR", "Hood: Ventilation Level 3");
+              id(ventilation_level) = 3;
+              id(update_hood_outputs).execute();
+              break;
+              
+            case 0xB9121B29:  // Hood Vent Level 4 -> Map to Level 3 (max for your hood)
+              ESP_LOGI("IR", "Hood: Ventilation Level 4 (mapped to 3)");
+              id(ventilation_level) = 3;
+              id(update_hood_outputs).execute();
+              break;
+              
+            case 0x055303A3:  // Hood Vent Off
+              ESP_LOGI("IR", "Hood: Ventilation Off");
+              id(ventilation_level) = 0;
+              id(update_hood_outputs).execute();
+              break;
+              
+            case 0xE208293C:  // Hood Light On
+              ESP_LOGI("IR", "Hood: Light On");
+              id(light_state) = true;
+              id(update_hood_outputs).execute();
+              break;
+              
+            case 0x24ACF947:  // Hood Light Off
+              ESP_LOGI("IR", "Hood: Light Off");
+              id(light_state) = false;
+              id(update_hood_outputs).execute();
+              break;
+              
+            default:
+              ESP_LOGI("IR", "Unknown IR command: 0x%08X", (uint32_t) x.command);
+              break;
+          }
+
+# Status logging for troubleshooting
+interval:
+  - interval: 30s
+    then:
+      - logger.log: 
+          format: "Status: Mode=%s, Fan=%d, Light=%s"
+          args: ['id(current_mode) == 0 ? "Auto" : "Manual"', 'id(ventilation_level)', 'id(light_state) ? "ON" : "OFF"']

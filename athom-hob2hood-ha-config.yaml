@@ -1,7 +1,7 @@
 esphome:
-  name: athom-hob2hood-ha
+  name: athom-hob2hood
   friendly_name: "Kitchen Hood Controller"
-  comment: "AEG/Electrolux Hob2Hood with manual override using Athom ESP32 4CH Relay Board"
+  comment: "AEG Hob2Hood with manual override using Athom ESP32 4CH Relay Board"
 
 esp32:
   board: esp32dev
@@ -50,7 +50,7 @@ globals:
     type: int
     initial_value: '0'  # Countdown for returning to hob2hood mode
 
-# IR Receiver for hob2hood signals
+# IR Receiver for AEG hob2hood signals
 remote_receiver:
   pin: GPIO2  # Connected to IO2 on right GPIO header
   dump: all   # Enable for initial testing, disable once working
@@ -120,29 +120,29 @@ binary_sensor:
   - platform: status
     name: "Hood Controller Status"
 
-# Relay outputs (using built-in relays)
+# Relay outputs (using Athom board's built-in relays - CORRECTED GPIO PINS)
 switch:
   # Physical relay outputs (internal use only)
   - platform: gpio
-    pin: GPIO12
+    pin: GPIO27  # CORRECTED: Relay 1 (was GPIO12)
     name: "Hood Fan Speed 1 Relay"
     id: fan_speed_1_relay
     internal: true
     
   - platform: gpio
-    pin: GPIO13
+    pin: GPIO14  # CORRECTED: Relay 2 (was GPIO13)
     name: "Hood Fan Speed 2 Relay"
     id: fan_speed_2_relay
     internal: true
     
   - platform: gpio
-    pin: GPIO14
+    pin: GPIO12  # CORRECTED: Relay 3 (was GPIO14)
     name: "Hood Fan Speed 3 Relay"
     id: fan_speed_3_relay
     internal: true
     
   - platform: gpio
-    pin: GPIO15
+    pin: GPIO13  # CORRECTED: Relay 4 (was GPIO15)
     name: "Hood Light Relay"
     id: light_relay
     internal: true
@@ -376,7 +376,7 @@ script:
           then:
             - logger.log: "All fans OFF (safe)"
 
-# Hob2Hood IR command handling
+# AEG Hob2Hood IR command handling
 remote_receiver:
   - pin: GPIO2
     dump: []  # Disable once IR codes are confirmed working
@@ -388,57 +388,57 @@ remote_receiver:
             return;
           }
           
-          ESP_LOGI("IR", "Received IR command: 0x%08X", (uint32_t) x.command);
+          ESP_LOGI("IR", "Received AEG IR command: 0x%08X", (uint32_t) x.command);
           
           switch(x.command) {
-            case 0xE3C01BE2:  // Hood Vent Level 1
-              ESP_LOGI("IR", "Hood: Ventilation Level 1");
+            case 0xE3C01BE2:  // AEG Vent Level 1
+              ESP_LOGI("IR", "AEG: Ventilation Level 1");
               id(ventilation_level) = 1;
               id(update_hood_outputs).execute();
               break;
               
-            case 0xD051C301:  // Hood Vent Level 2
-              ESP_LOGI("IR", "Hood: Ventilation Level 2");
+            case 0xD051C301:  // AEG Vent Level 2
+              ESP_LOGI("IR", "AEG: Ventilation Level 2");
               id(ventilation_level) = 2;
               id(update_hood_outputs).execute();
               break;
               
-            case 0xC22FFFD7:  // Hood Vent Level 3
-              ESP_LOGI("IR", "Hood: Ventilation Level 3");
+            case 0xC22FFFD7:  // AEG Vent Level 3
+              ESP_LOGI("IR", "AEG: Ventilation Level 3");
               id(ventilation_level) = 3;
               id(update_hood_outputs).execute();
               break;
               
-            case 0xB9121B29:  // Hood Vent Level 4 -> Map to Level 3 (max for your hood)
-              ESP_LOGI("IR", "Hood: Ventilation Level 4 (mapped to 3)");
+            case 0xB9121B29:  // AEG Vent Level 4 -> Map to Level 3 (max for your hood)
+              ESP_LOGI("IR", "AEG: Ventilation Level 4 (mapped to 3)");
               id(ventilation_level) = 3;
               id(update_hood_outputs).execute();
               break;
               
-            case 0x055303A3:  // Hood Vent Off
-              ESP_LOGI("IR", "Hood: Ventilation Off");
+            case 0x055303A3:  // AEG Vent Off
+              ESP_LOGI("IR", "AEG: Ventilation Off");
               id(ventilation_level) = 0;
               id(update_hood_outputs).execute();
               break;
               
-            case 0xE208293C:  // Hood Light On
-              ESP_LOGI("IR", "Hood: Light On");
+            case 0xE208293C:  // AEG Light On
+              ESP_LOGI("IR", "AEG: Light On");
               id(light_state) = true;
               id(update_hood_outputs).execute();
               break;
               
-            case 0x24ACF947:  // Hood Light Off
-              ESP_LOGI("IR", "Hood: Light Off");
+            case 0x24ACF947:  // AEG Light Off
+              ESP_LOGI("IR", "AEG: Light Off");
               id(light_state) = false;
               id(update_hood_outputs).execute();
               break;
               
             default:
-              ESP_LOGI("IR", "Unknown IR command: 0x%08X", (uint32_t) x.command);
+              ESP_LOGI("IR", "Unknown AEG command: 0x%08X", (uint32_t) x.command);
               break;
           }
 
-# Status logging for troubleshooting
+# Status logging for troubleshooting (RAM only - no flash wear)
 interval:
   - interval: 30s
     then:

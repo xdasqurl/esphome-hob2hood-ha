@@ -91,7 +91,7 @@ Athom Relay → Hood Circuit
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/esphome-hob2hood
+   git clone https://github.com/xdasqurl/esphome-hob2hood-ha.git
    cd esphome-hob2hood
    ```
 

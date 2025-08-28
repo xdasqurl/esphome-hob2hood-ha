@@ -105,7 +105,7 @@ Athom Relay → Hood Circuit
 
 4. Flash the configuration:
    ```bash
-   esphome run athom-hob2hood.yaml
+   esphome run athom-hob2hood-ha-config.yaml
    ```
 
 ### **3. Initial Testing**

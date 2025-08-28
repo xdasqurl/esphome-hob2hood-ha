@@ -199,10 +199,10 @@ const long IRCMD_LIGHT_OFF = 0x24ACF947;  // Light off
 
 ## Safety Warnings
 
-- ** DANGER! HIGH VOLTAGE!**: This project involves 230V AC wiring. During installation, turn off mains power and follow local electrical codes.
-- ** Proper Installation**: Use appropriate wire gauges and electrical protection.
-- **️ Professional Help**: Consider hiring an electrician for 230V connections.
-- **️ Compliance**: Ensure installation meets local electrical safety regulations.
+- **DANGER! HIGH VOLTAGE!**: This project involves 230V AC wiring. During installation, turn off mains power and follow local electrical codes.
+- **Proper Installation**: Use appropriate wire gauges and electrical protection.
+- **Professional Help**: Consider hiring an electrician for 230V connections.
+- **Compliance**: Ensure installation meets local electrical safety regulations.
 
 ## References
 
